@@ -94,8 +94,10 @@ static NSString *AllStatusTitle(NSDictionary *primary, NSDictionary *weekly, NST
     NSStatusBarButton *button = self.statusItem.button;
     button.title = @"—% (—)";
     button.imagePosition = NSImageRight;
-    NSString *logo = [NSBundle.mainBundle pathForResource:@"chatgptTemplate" ofType:@"png"];
-    if (!logo) logo = @"/Applications/ChatGPT.app/Contents/Resources/chatgptTemplate.png";
+    NSString *logo = [NSBundle.mainBundle pathForResource:@"chatgptTemplate@2x" ofType:@"png"];
+    if (!logo) logo = @"/Applications/ChatGPT.app/Contents/Resources/chatgptTemplate@2x.png";
+    if (![NSFileManager.defaultManager fileExistsAtPath:logo])
+        logo = @"/Applications/ChatGPT.app/Contents/Resources/chatgptTemplate.png";
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:logo];
     if (!image) image = [NSImage imageWithSystemSymbolName:@"gauge.with.dots.needle.67percent"
                                   accessibilityDescription:@"Codex Meter"];
