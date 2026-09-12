@@ -9,9 +9,22 @@ static NSString *RemainingTime(NSTimeInterval reset, NSTimeInterval now) {
         : [NSString stringWithFormat:@"%ld시간", hours];
 }
 
+static NSString *ResetDate(NSTimeInterval reset, NSString *format, NSTimeZone *timeZone) {
+    NSDateFormatter *formatter = [NSDateFormatter new];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"ko_KR"];
+    formatter.timeZone = timeZone;
+    formatter.dateFormat = format;
+    return [formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:reset]];
+}
+
 static NSString *StatusTitle(double used, NSTimeInterval reset, NSTimeInterval now) {
     NSInteger remaining = MAX(0, MIN(100, lround(100 - used)));
     return [NSString stringWithFormat:@"%ld%% (%@)\u2009", remaining, RemainingTime(reset, now)];
+}
+
+static NSString *WeeklyStatusTitle(double used, NSTimeInterval reset, NSTimeZone *timeZone) {
+    NSInteger remaining = MAX(0, MIN(100, lround(100 - used)));
+    return [NSString stringWithFormat:@"%ld%% (%@)\u2009", remaining, ResetDate(reset, @"M/d EEE HH:mm", timeZone)];
 }
 
 static NSString *AllStatusTitle(NSDictionary *primary, NSDictionary *weekly, NSTimeInterval now) {
@@ -19,12 +32,13 @@ static NSString *AllStatusTitle(NSDictionary *primary, NSDictionary *weekly, NST
     NSInteger weeklyRemaining = MAX(0, MIN(100, lround(100 - [weekly[@"usedPercent"] doubleValue])));
     return [NSString stringWithFormat:@"5h %ld%% (%@) / 주 %ld%% (%@)\u2009",
         primaryRemaining, RemainingTime([primary[@"resetsAt"] doubleValue], now),
-        weeklyRemaining, RemainingTime([weekly[@"resetsAt"] doubleValue], now)];
+        weeklyRemaining, ResetDate([weekly[@"resetsAt"] doubleValue], @"M/d EEE HH:mm", NSTimeZone.localTimeZone)];
 }
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @property NSStatusItem *statusItem;
 @property NSMenuItem *updatedItem;
+@property NSMenuItem *weeklyResetItem;
 @property NSMenuItem *fiveHourItem;
 @property NSMenuItem *weeklyItem;
 @property NSMenuItem *allLimitsItem;
@@ -109,6 +123,8 @@ static NSString *AllStatusTitle(NSDictionary *primary, NSDictionary *weekly, NST
     [menu addItem:refreshItem];
     self.updatedItem = [[NSMenuItem alloc] initWithTitle:@"연결 중…" action:nil keyEquivalent:@""];
     [menu addItem:self.updatedItem];
+    self.weeklyResetItem = [[NSMenuItem alloc] initWithTitle:@"주간 초기화: 확인 중…" action:nil keyEquivalent:@""];
+    [menu addItem:self.weeklyResetItem];
     [menu addItem:NSMenuItem.separatorItem];
     NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"종료" action:@selector(quit) keyEquivalent:@"q"];
     quitItem.target = self;
@@ -214,6 +230,11 @@ static NSString *AllStatusTitle(NSDictionary *primary, NSDictionary *weekly, NST
 }
 
 - (void)updateTitle {
+    NSNumber *weeklyReset = self.limits[@"secondary"][@"resetsAt"];
+    if (weeklyReset) {
+        NSString *date = ResetDate(weeklyReset.doubleValue, @"M/d EEE HH:mm:ss z", NSTimeZone.localTimeZone);
+        self.weeklyResetItem.title = [@"주간 초기화: " stringByAppendingString:date];
+    }
     if ([self.selectedLimit isEqual:@"all"]) {
         NSDictionary *primary = self.limits[@"primary"];
         NSDictionary *weekly = self.limits[@"secondary"];
@@ -225,7 +246,11 @@ static NSString *AllStatusTitle(NSDictionary *primary, NSDictionary *weekly, NST
     NSNumber *used = limit[@"usedPercent"];
     NSNumber *reset = limit[@"resetsAt"];
     if (!used || !reset) return;
-    self.statusItem.button.title = StatusTitle(used.doubleValue, reset.doubleValue, NSDate.date.timeIntervalSince1970);
+    if ([self.selectedLimit isEqual:@"secondary"]) {
+        self.statusItem.button.title = WeeklyStatusTitle(used.doubleValue, reset.doubleValue, NSTimeZone.localTimeZone);
+    } else {
+        self.statusItem.button.title = StatusTitle(used.doubleValue, reset.doubleValue, NSDate.date.timeIntervalSince1970);
+    }
 }
 
 - (void)selectLimit:(NSMenuItem *)sender {
@@ -290,9 +315,15 @@ int main(int argc, const char *argv[]) {
             NSCAssert([RemainingTime(now + 30 * 3600, now) isEqual:@"1일 6시간"], @"30h");
             NSCAssert([RemainingTime(now + 51 * 3600, now) isEqual:@"2일 3시간"], @"51h");
             NSCAssert([StatusTitle(50, now + 30 * 3600, now) isEqual:@"50% (1일 6시간)\u2009"], @"title spacing");
+            NSTimeZone *tokyo = [NSTimeZone timeZoneWithName:@"Asia/Tokyo"];
+            NSCAssert([ResetDate(1789810362, @"M/d EEE HH:mm", tokyo) isEqual:@"9/19 토 18:32"], @"weekly date and time");
+            NSCAssert([ResetDate(1789810362, @"M/d EEE HH:mm:ss", tokyo) isEqual:@"9/19 토 18:32:42"], @"weekly exact reset");
+            NSCAssert([WeeklyStatusTitle(2, 1789810362, tokyo) isEqual:@"98% (9/19 토 18:32)\u2009"], @"weekly status");
             NSDictionary *primary = @{@"usedPercent": @17, @"resetsAt": @(now + 2 * 3600)};
-            NSDictionary *weekly = @{@"usedPercent": @61, @"resetsAt": @(now + 51 * 3600)};
-            NSCAssert([AllStatusTitle(primary, weekly, now) isEqual:@"5h 83% (2시간) / 주 39% (2일 3시간)\u2009"], @"all limits");
+            NSDictionary *weekly = @{@"usedPercent": @61, @"resetsAt": @1789810362};
+            NSString *expected = [NSString stringWithFormat:@"5h 83%% (2시간) / 주 39%% (%@)\u2009",
+                ResetDate(1789810362, @"M/d EEE HH:mm", NSTimeZone.localTimeZone)];
+            NSCAssert([AllStatusTitle(primary, weekly, now) isEqual:expected], @"all limits");
             puts("ok");
             return 0;
         }
