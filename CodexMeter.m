@@ -2,13 +2,6 @@
 #import <dispatch/dispatch.h>
 #import <fcntl.h>
 
-static NSString *RemainingTime(NSTimeInterval reset, NSTimeInterval now) {
-    NSInteger hours = MAX(0, (NSInteger)((reset - now) / 3600));
-    return hours > 24
-        ? [NSString stringWithFormat:@"%ld일 %ld시간", hours / 24, hours % 24]
-        : [NSString stringWithFormat:@"%ld시간", hours];
-}
-
 static NSString *ResetDate(NSTimeInterval reset, NSString *format, NSTimeZone *timeZone) {
     NSDateFormatter *formatter = [NSDateFormatter new];
     formatter.locale = [NSLocale localeWithLocaleIdentifier:@"ko_KR"];
@@ -17,9 +10,20 @@ static NSString *ResetDate(NSTimeInterval reset, NSString *format, NSTimeZone *t
     return [formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:reset]];
 }
 
+static NSString *FiveHourResetTime(NSTimeInterval reset, NSTimeInterval now, NSTimeZone *timeZone) {
+    NSCalendar *calendar = NSCalendar.currentCalendar;
+    calendar.timeZone = timeZone;
+    NSDate *resetDate = [NSDate dateWithTimeIntervalSince1970:reset];
+    NSDate *nowDate = [NSDate dateWithTimeIntervalSince1970:now];
+    NSDate *tomorrow = [calendar dateByAddingUnit:NSCalendarUnitDay value:1 toDate:nowDate options:0];
+    NSString *day = [calendar isDate:resetDate inSameDayAsDate:nowDate] ? @"오늘" :
+        [calendar isDate:resetDate inSameDayAsDate:tomorrow] ? @"내일" : ResetDate(reset, @"M/d", timeZone);
+    return [NSString stringWithFormat:@"%@ %@", day, ResetDate(reset, @"HH:mm", timeZone)];
+}
+
 static NSString *StatusTitle(double used, NSTimeInterval reset, NSTimeInterval now) {
     NSInteger remaining = MAX(0, MIN(100, lround(100 - used)));
-    return [NSString stringWithFormat:@"%ld%% (%@)\u2009", remaining, RemainingTime(reset, now)];
+    return [NSString stringWithFormat:@"%ld%% (%@)\u2009", remaining, FiveHourResetTime(reset, now, NSTimeZone.localTimeZone)];
 }
 
 static NSString *WeeklyStatusTitle(double used, NSTimeInterval reset, NSTimeZone *timeZone) {
@@ -31,7 +35,7 @@ static NSString *AllStatusTitle(NSDictionary *primary, NSDictionary *weekly, NST
     NSInteger primaryRemaining = MAX(0, MIN(100, lround(100 - [primary[@"usedPercent"] doubleValue])));
     NSInteger weeklyRemaining = MAX(0, MIN(100, lround(100 - [weekly[@"usedPercent"] doubleValue])));
     return [NSString stringWithFormat:@"5h %ld%% (%@) / 주 %ld%% (%@)\u2009",
-        primaryRemaining, RemainingTime([primary[@"resetsAt"] doubleValue], now),
+        primaryRemaining, FiveHourResetTime([primary[@"resetsAt"] doubleValue], now, NSTimeZone.localTimeZone),
         weeklyRemaining, ResetDate([weekly[@"resetsAt"] doubleValue], @"M/d EEE HH:mm", NSTimeZone.localTimeZone)];
 }
 
@@ -312,18 +316,20 @@ int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc > 1 && strcmp(argv[1], "--self-test") == 0) {
             NSTimeInterval now = 1000000;
-            NSCAssert([RemainingTime(now + 8 * 3600, now) isEqual:@"8시간"], @"8h");
-            NSCAssert([RemainingTime(now + 24 * 3600, now) isEqual:@"24시간"], @"24h");
-            NSCAssert([RemainingTime(now + 30 * 3600, now) isEqual:@"1일 6시간"], @"30h");
-            NSCAssert([RemainingTime(now + 51 * 3600, now) isEqual:@"2일 3시간"], @"51h");
-            NSCAssert([StatusTitle(50, now + 30 * 3600, now) isEqual:@"50% (1일 6시간)\u2009"], @"title spacing");
             NSTimeZone *tokyo = [NSTimeZone timeZoneWithName:@"Asia/Tokyo"];
+            NSTimeInterval fiveHourReset = 1789810362 - 17 * 3600;
+            NSCAssert([FiveHourResetTime(fiveHourReset, fiveHourReset - 3600, tokyo) isEqual:@"오늘 01:32"], @"same-day reset");
+            NSCAssert([FiveHourResetTime(fiveHourReset, fiveHourReset - 2 * 3600, tokyo) isEqual:@"내일 01:32"], @"next-day reset");
+            NSString *fiveHourTitle = [NSString stringWithFormat:@"50%% (%@)\u2009",
+                FiveHourResetTime(now + 2 * 3600, now, NSTimeZone.localTimeZone)];
+            NSCAssert([StatusTitle(50, now + 2 * 3600, now) isEqual:fiveHourTitle], @"title spacing");
             NSCAssert([ResetDate(1789810362, @"M/d EEE HH:mm", tokyo) isEqual:@"9/19 토 18:32"], @"weekly date and time");
             NSCAssert([ResetDate(1789810362, @"M/d EEE HH:mm:ss", tokyo) isEqual:@"9/19 토 18:32:42"], @"weekly exact reset");
             NSCAssert([WeeklyStatusTitle(2, 1789810362, tokyo) isEqual:@"98% (9/19 토 18:32)\u2009"], @"weekly status");
             NSDictionary *primary = @{@"usedPercent": @17, @"resetsAt": @(now + 2 * 3600)};
             NSDictionary *weekly = @{@"usedPercent": @61, @"resetsAt": @1789810362};
-            NSString *expected = [NSString stringWithFormat:@"5h 83%% (2시간) / 주 39%% (%@)\u2009",
+            NSString *expected = [NSString stringWithFormat:@"5h 83%% (%@) / 주 39%% (%@)\u2009",
+                FiveHourResetTime(now + 2 * 3600, now, NSTimeZone.localTimeZone),
                 ResetDate(1789810362, @"M/d EEE HH:mm", NSTimeZone.localTimeZone)];
             NSCAssert([AllStatusTitle(primary, weekly, now) isEqual:expected], @"all limits");
             puts("ok");

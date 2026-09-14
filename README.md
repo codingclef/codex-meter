@@ -8,7 +8,7 @@ It reads `account/rateLimits/read` from the locally installed Codex app server. 
 
 - Show the 5-hour limit, weekly limit, or both
 - Refresh every 30 seconds and at conversation activity boundaries
-- Show the 5-hour reset as remaining hours and the weekly reset as local date, weekday, and time (`9/19 토 18:32`); the menu shows the reset time to the second
+- Show the 5-hour reset as `오늘 18:32` or `내일 01:32` and the weekly reset as local date, weekday, and time (`9/19 토 18:32`); the menu shows the weekly reset time to the second
 - Remember the selected display mode
 
 ## Requirements
